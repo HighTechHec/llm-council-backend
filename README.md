@@ -10,6 +10,22 @@ The frontend (React + Vite) lives in the sibling repository
 
 ---
 
+## Tech stack
+
+| Layer | Technology |
+|-------|-----------|
+| Language | Go 1.25+ |
+| HTTP server | `net/http` (stdlib) |
+| Concurrency | `sync.WaitGroup` + per-conversation `sync.Mutex` (stdlib) |
+| Streaming | Server-Sent Events over `net/http` |
+| Storage | JSON files on disk (no database) |
+| LLM gateway | [OpenRouter](https://openrouter.ai) REST API |
+| Config | Environment variables + `godotenv` |
+| ID generation | `github.com/google/uuid` |
+| Frontend | React + Vite (separate repo) |
+
+---
+
 ## How it works
 
 ```
