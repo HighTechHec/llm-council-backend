@@ -29,35 +29,33 @@ make clean       # rm -rf bin/
 
 Always run from the **project root** (not from a subdirectory). The binary resolves `data/conversations/` relative to the working directory.
 
-**Environment:** copy `.env.example` to `.env` and fill in the required value:
+**Environment:** create a `.env` file in the project root (see `.env.example`):
 
 ```
-OPENROUTER_API_KEY=sk-or-v1-...   # required — server refuses to start without it
+OPENROUTER_API_KEY=sk-or-v1-...
 ```
 
-Optional overrides (all have defaults):
+`godotenv.Load()` silently ignores a missing `.env`; the server will start but every OpenRouter call will fail with a 401. Optional overrides:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `COUNCIL_MODELS` | 4 preset models | Comma-separated list of OpenRouter model IDs |
 | `CHAIRMAN_MODEL` | `google/gemini-3-pro-preview` | Model for Stage 3 synthesis |
-| `TITLE_MODEL` | `google/gemini-2.5-flash` | Model for conversation title generation |
 | `DATA_DIR` | `data/conversations` | Directory for JSON conversation files |
 | `PORT` | `8001` | TCP port the server listens on |
-| `CORS_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Comma-separated allowed origins |
 
 ## Package layout
 
 ```
 cmd/server/main.go            — entry point; wires config → openrouter → council → storage → api
-internal/config/config.go     — Config struct, Load() reads env vars, Validate() fails fast on missing key
+internal/config/config.go     — Config struct, Load() reads env vars
 internal/openrouter/client.go — QueryModel() / QueryModelsParallel() (sync.WaitGroup)
 internal/council/types.go     — StageOneResult, StageTwoResult, StageThreeResult, Metadata, Result
 internal/council/council.go   — Stage1…3, RunFull(), GenerateTitle(), CalculateAggregateRankings()
 internal/storage/storage.go   — Create/Get/AddMessage/UpdateTitle/List; atomic writes; per-conv mutex
 internal/api/handler.go       — HTTP handlers, CORS middleware, SSE streaming; all routes in Routes()
 Makefile                      — build / dev / run / lint / test / clean targets
-.env.example                  — template listing all supported environment variables
+.env.example                  — template listing supported environment variables
 .github/copilot-instructions.md — this file
 .github/dependabot.yml        — weekly Go module and GitHub Actions dependency updates
 docs/                         — architecture.md, council-stages.md, go-implementation.md
@@ -65,23 +63,23 @@ docs/                         — architecture.md, council-stages.md, go-impleme
 
 ## Key design constraints
 
-- **Config validation** — `Config.Validate()` is called at startup; the server exits with a fatal log if `OPENROUTER_API_KEY` is empty, `CouncilModels` is empty, or `Port` is empty.
 - **Storage IDs must be UUIDs** — `storage.Get/Create/AddMessage/UpdateTitle` validate against `^[0-9a-f]{8}-...$` and return an error for invalid IDs.
 - **Atomic writes** — `storage.save()` writes to `{id}.json.tmp` then `os.Rename`; never write directly to `{id}.json`.
 - **Per-conversation locking** — `storage.lockConv(id)` must wrap every read-modify-write cycle (`AddMessage`, `UpdateTitle`).
 - **Stage 2 label limit** — `Stage2CollectRankings` returns an error if `len(stage1Results) > 26`.
 - **Request body limit** — both `sendMessage` and `sendMessageStream` apply `http.MaxBytesReader(w, r.Body, 1<<20)` before decoding.
 - **SSE format** — all streaming events are `data: {...}\n\n` with a `type` field in the JSON; no SSE `event:` line is used.
-- **CORS** — allowed origins come from `Config.CORSOrigins` (read from `CORS_ORIGINS` env var); `Vary: Origin` is set when reflecting the origin.
+- **CORS** — only `http://localhost:5173` and `http://localhost:3000` are allowed origins (hardcoded in `corsMiddleware`); `Vary: Origin` is set when reflecting the origin.
 - **File permissions** — data dir: `0700`; conversation files: `0600`.
+- **Title generation** — `GenerateTitle` always uses `google/gemini-2.5-flash` (hardcoded).
 
 ## HTTP API
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/` | Health check |
+| GET | `/` | Health check → `{"status":"ok"}` |
 | GET | `/api/conversations` | List conversations (metadata) |
-| POST | `/api/conversations` | Create conversation → HTTP 201 |
+| POST | `/api/conversations` | Create conversation → HTTP 200 |
 | GET | `/api/conversations/{id}` | Get conversation with messages |
 | POST | `/api/conversations/{id}/message` | Send message, full JSON response |
 | POST | `/api/conversations/{id}/message/stream` | Send message, SSE stream |
