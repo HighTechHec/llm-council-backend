@@ -2,8 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,11 +19,14 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
 	godotenv.Load() // ignore error if .env not present
 
 	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {
-		log.Fatalf("invalid configuration: %v", err)
+		slog.Error("invalid configuration", "error", err)
+		os.Exit(1)
 	}
 
 	client := openrouter.New(cfg.OpenRouterAPIKey)
@@ -36,9 +38,10 @@ func main() {
 	srv := &http.Server{Addr: addr, Handler: handler.Routes()}
 
 	go func() {
-		fmt.Printf("LLM Council API listening on %s\n", addr)
+		slog.Info("LLM Council API listening", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %v", err)
+			slog.Error("server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -46,13 +49,14 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down server...")
+	slog.Info("shutting down server")
 	// Worst-case request duration: Stage1 + Stage2 + Stage3, each 120 s → 360 s total.
 	// Allow a generous margin so in-flight council requests can complete.
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("server forced to shutdown: %v", err)
+		slog.Error("server forced to shutdown", "error", err)
+		os.Exit(1)
 	}
-	log.Println("Server stopped")
+	slog.Info("server stopped")
 }
